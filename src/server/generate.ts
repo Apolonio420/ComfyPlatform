@@ -1,99 +1,55 @@
-import { db } from "@/db/db";
-import { runs } from "@/db/schema";
-import { auth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm/expressions";
-
-async function promptOptimizer(prompt: string): Promise<string> {
-    console.log("Optimizing prompt with assistant...");
-    try {
-        const response = await fetch("https://hook.us2.make.com/rdpyblg9ov0hrjcqhsktc8l7o6gmiwsc", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt }),
-        });
-
-        if (!response.ok) {
-            console.error(`Failed to optimize prompt: ${response.statusText}`);
-            return prompt;
-        }
-
-        const result = await response.json();
-        return result?.choices?.[0]?.content ?? prompt;
-    } catch (error: any) {
-        console.error("Error optimizing the prompt:", error.message || error);
-        return prompt;
-    }
-}
-
+// src/server/generate.ts
 export async function generateImage(
     prompt: string,
     endpoint: string,
-    options: { height: number; width: number; lora: string; batchSize: number }
-  ) {
-    const { userId } = auth();
-    if (!userId) throw new Error("User not found");
+    options: {
+      height: number;
+      width: number;
+      lora?: string;
+      batchSize?: number;
+      lora_strength?: number;
+    }
+  ): Promise<string> {
+    const { height, width, lora, batchSize = 1, lora_strength } = options;
   
-    const { height, width, lora, batchSize } = options;
-  
-    const run_id = `run_${Date.now()}`;
-  
-    const inputsForDB = {
+    const inputs: Record<string, string | number> = {
       prompt,
-      height: height.toString(),
-      width: width.toString(),
-      lora,
-      batchSize: batchSize.toString(),
+      height,
+      width,
+      batch: batchSize,
     };
   
-    await db.insert(runs).values({
-      run_id,
-      user_id: userId,
-      live_status: "optimizing_prompt",
-      inputs: inputsForDB,
-    });
+    if (lora) inputs["lora"] = lora;
+    if (lora_strength !== undefined) inputs["lora_strength"] = lora_strength;
   
-    const optimizedPrompt = prompt;
-  
-    const inputsForAPI = {
-      input_text: optimizedPrompt,
-      height: height.toString(),
-      width: width.toString(),
-      lora,
-      batch: batchSize.toString(),
-    };
+    console.log("Enviando solicitud a ComfyDeploy con los siguientes datos:", inputs);
   
     try {
-      const response = await fetch("https://www.comfydeploy.com/api/run", {
+      const response = await fetch("https://api.comfydeploy.com/api/run/queue", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.COMFY_DEPLOY_API_KEY}`,
         },
         body: JSON.stringify({
-          deployment_id: process.env.COMFY_DEPLOY_WF_DEPLOYMENT_ID,
-          inputs: inputsForAPI,
-          webhook: `${endpoint}/api/webhook`,
+          inputs,
+          webhook: `${endpoint}/api/status`,
         }),
       });
   
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`ComfyDeploy API Error: ${response.status} ${response.statusText}`, errorText);
         throw new Error(`ComfyDeploy API responded with status ${response.status}`);
       }
   
       const result = await response.json();
-      if (result?.run_id) {
-        await db.update(runs).set({
-          live_status: "queued",
-          inputs: inputsForDB,
-        }).where(eq(runs.run_id, run_id));
-        return run_id;
-      } else {
-        throw new Error("Image generation failed: Invalid response from ComfyDeploy");
-      }
+      console.log("Respuesta exitosa de ComfyDeploy:", result);
+  
+      return result.run_id;
     } catch (error) {
-      console.error("Error calling ComfyDeploy API:", error);
-      throw new Error("Error generating image");
+      console.error("Error llamando a la API de ComfyDeploy:", error);
+      throw new Error("Failed to generate image");
     }
   }
-  
   

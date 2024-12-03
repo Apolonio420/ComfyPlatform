@@ -1,42 +1,31 @@
-import { db } from "@/db/db";
-import { runs } from "@/db/schema";
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const run_id = searchParams.get("run_id");
-
-  if (!run_id) {
-    return NextResponse.json(
-      { error: "run_id is required" },
-      { status: 400 }
-    );
-  }
+export async function GET(request: NextRequest, { params }: { params: { runId: string } }) {
+  const { runId } = params;
 
   try {
-    // Busca el run en la base de datos
-    const [run] = await db.select().from(runs).where(eq(runs.run_id, run_id));
+    const response = await fetch(`https://api.comfydeploy.com/api/run/${runId}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${process.env.COMFY_DEPLOY_API_KEY}`,
+      },
+    });
 
-    if (!run) {
-      return NextResponse.json(
-        { error: "Run ID not found" },
-        { status: 404 }
+    if (!response.ok) {
+      const errorDetails = await response.json();
+      throw new Error(
+        `ComfyDeploy API Error: ${response.status} ${response.statusText} ${JSON.stringify(
+          errorDetails
+        )}`
       );
     }
 
-    // Devuelve el live_status y la URL de la imagen si está disponible
-    return NextResponse.json(
-      {
-        live_status: run.live_status || "processing",
-        image_url: run.image_url || null,
-      },
-      { status: 200 }
-    );
+    const statusData = await response.json();
+    return NextResponse.json(statusData);
   } catch (error) {
-    console.error("Error checking image generation status:", error);
+    console.error("Error obteniendo el estado del run:", error);
     return NextResponse.json(
-      { error: "Internal Server Error" },
+      { error: "Error obteniendo el estado del run", details: (error as Error).message },
       { status: 500 }
     );
   }

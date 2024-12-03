@@ -34,19 +34,25 @@ export function ImageGenerationResult({
   useEffect(() => {
     if (data) {
       const res = data;
+      console.log("ComfyDeploy response:", res);
+  
       setStatus(res.status);
       setProgress(res.progress);
       setLiveStatus(res.liveStatus ?? null);
-
+  
       if (res.status === "success") {
         const imageUrl = res.outputs?.[0]?.data?.images?.[0]?.url ?? "";
+        console.log("Generated image URL:", imageUrl); // <-- Log explícito
         if (imageUrl) {
           setImage(imageUrl);
           setLoading(false);
+        } else {
+          console.error("No image URL found in response");
         }
       }
     }
   }, [data]);
+  
 
   return (
     <div
